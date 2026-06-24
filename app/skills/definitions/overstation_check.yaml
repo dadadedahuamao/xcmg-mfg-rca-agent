@@ -1,0 +1,51 @@
+# 超站检查技能定义
+anomaly_type: overstation_check
+display_name: 超站检查
+description: 检测并分析生产工序超站问题，识别瓶颈工位和根因
+
+trigger_type: overstation_check
+severity: high
+
+steps:
+  - name: 症状确认
+    description: 确认超站工位、超站时长和影响范围
+    tools: [workorder]
+  - name: 设备状态检查
+    description: 检查超站工位的设备运行状态和维保记录
+    tools: [equipment_maintenance]
+  - name: 物料供应检查
+    description: 检查超站工位的物料供应情况
+    tools: [material]
+  - name: 资源冲突检查
+    description: 检查是否存在资源争用或人员不足
+    tools: [resource]
+  - name: 知识库检索
+    description: 检索超站处理的 SOP 和历史案例
+    tools: [knowledge]
+
+tools:
+  - workorder
+  - equipment_maintenance
+  - material
+  - resource
+  - knowledge
+
+evidence_rules:
+  - name: 设备故障证据
+    condition: equipment_maintenance 返回 status=overdue 或 in_progress
+    weight: 0.3
+  - name: 物料短缺证据
+    condition: material 返回 quantity <= safety_stock
+    weight: 0.25
+  - name: 资源冲突证据
+    condition: resource 返回 conflict_count > 0
+    weight: 0.2
+  - name: 工单堆积证据
+    condition: workorder 返回 status=delayed 且 count > 3
+    weight: 0.25
+
+recommendations:
+  - 检查并优化瓶颈工位的工艺参数
+  - 加强设备预防性维护
+  - 优化物料配送流程
+  - 建立超站预警机制

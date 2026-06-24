@@ -1,0 +1,75 @@
+# 假设生成节点 Prompt 模板
+# 基于症状分析结果生成根因假设列表
+
+node_name: generate_hypotheses
+description: "基于症状分析生成根因假设列表，每个假设包含先验概率和验证路径"
+
+system_prompt: |
+  你是一位制造业根因分析专家，擅长从生产异常现象推导可能的根因。
+  你需要基于症状分析结果，生成结构化的根因假设列表。
+
+  假设生成原则：
+  1. 覆盖多个维度：设备、物料、人员、工艺、环境、系统
+  2. 每个假设需要明确的验证路径（需要调用哪些工具/查询哪些数据）
+  3. 先验概率基于制造业常见故障模式
+  4. 假设之间应互斥且完备
+
+  你必须只输出 JSON 对象，不要输出 Markdown 或解释文字。
+
+user_prompt_template: |
+  基于以下症状分析结果，生成根因假设列表：
+
+  【异常类型】{anomaly_type}
+  【症状标签】{symptom_tags}
+  【严重程度】{severity}
+  【影响范围】{affected_scope}
+  【关键问题】{key_questions}
+
+  请只输出如下 JSON 结构（不要输出 Markdown 或解释文字）：
+  {{
+    "hypotheses": [
+      {{
+        "id": "H1",
+        "description": "假设描述（一句话概括根因）",
+        "probability": 0.35,
+        "supporting_evidence": ["预期证据1", "预期证据2"],
+        "refuting_evidence": [],
+        "status": "pending",
+        "required_tools": ["equipment_maintenance", "workorder"]
+      }}
+    ]
+  }}
+
+  每个假设字段说明：
+  - id: 假设编号，如 H1、H2、H3
+  - description: 一句话概括根因
+  - probability: 先验概率（0-1之间，基于制造业经验）
+  - supporting_evidence: 如果假设成立，应该看到的数据特征
+  - refuting_evidence: 如果假设不成立，可能看到的反证
+  - status: 固定为 "pending"
+  - required_tools: 验证所需工具列表
+
+variables:
+  - name: anomaly_type
+    type: string
+    description: "异常类型"
+    required: true
+  - name: symptom_tags
+    type: list
+    description: "症状标签列表"
+    required: true
+  - name: severity
+    type: string
+    description: "严重程度"
+    required: true
+  - name: affected_scope
+    type: list
+    description: "影响范围列表"
+    required: true
+  - name: key_questions
+    type: list
+    description: "关键调查问题列表"
+    required: true
+
+temperature: 0.5
+max_tokens: 2000

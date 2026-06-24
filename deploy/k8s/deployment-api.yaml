@@ -1,0 +1,55 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-api
+  namespace: xcmg-rca
+  labels:
+    app: rca-api
+    app.kubernetes.io/name: xcmg-mfg-rca-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rca-api
+  template:
+    metadata:
+      labels:
+        app: rca-api
+    spec:
+      containers:
+        - name: api
+          image: xcmg-mfg-rca-agent:latest
+          imagePullPolicy: IfNotPresent
+          ports:
+            - containerPort: 8000
+              name: http
+          envFrom:
+            - configMapRef:
+                name: rca-config
+            - secretRef:
+                name: rca-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
+          livenessProbe:
+            httpGet:
+              path: /api/v1/rca/health
+              port: 8000
+            initialDelaySeconds: 10
+            periodSeconds: 30
+          readinessProbe:
+            httpGet:
+              path: /api/v1/rca/health
+              port: 8000
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          volumeMounts:
+            - name: data
+              mountPath: /app/app/data
+      volumes:
+        - name: data
+          emptyDir: {}

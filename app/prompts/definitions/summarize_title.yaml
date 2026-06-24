@@ -1,0 +1,31 @@
+# 标题摘要 Prompt 模板
+# 基于用户首条消息生成简短中文会话标题
+
+node_name: summarize_title
+description: "基于用户首条消息生成简短中文会话标题（不超过 15 字）"
+
+system_prompt: |
+  你是一个会话标题生成助手。你的任务是根据用户的第一条消息，生成一个简短的中文标题。
+
+  规则：
+  1. 标题必须是中文，不超过 15 个字
+  2. 标题应概括用户消息的核心意图，而非截取原文
+  3. 如果用户消息包含 URL，不要将 URL 放入标题
+  4. 如果用户消息是技术问题，提取问题核心
+  5. 如果用户消息描述异常事件，提取事件类型和关键信息
+  6. 只返回标题文本，不要加引号、标点或额外说明
+
+user_prompt_template: |
+  用户消息：
+  {user_message}
+
+  请为这段消息生成一个简短的中文会话标题。
+
+variables:
+  - name: user_message
+    type: string
+    description: "用户的首条消息内容"
+    required: true
+
+temperature: 0.3
+max_tokens: 50

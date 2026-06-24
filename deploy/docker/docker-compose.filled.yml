@@ -1,0 +1,58 @@
+services:
+  api:
+    build:
+      context: ../..
+      dockerfile: deploy/docker/Dockerfile
+    container_name: xcmg-rca-api
+    environment:
+      API_HOST: 0.0.0.0
+      API_PORT: 8000
+      DEBUG: "false"
+      DATABASE_URL: postgresql://postgres:123456@192.168.80.2:5432/xcmg_rca
+      DATABASE_SCHEMA: public
+      BUSINESS_DATABASE_URL: postgresql://postgres:123456@192.168.80.2:5432/xcmg_rca
+      BUSINESS_DATABASE_SCHEMA: public
+      RAG_SOURCE_DIR: ./app/data/knowledge/raw
+      RAG_CHUNKS_DIR: ./app/data/knowledge/chunks
+      RAG_INDEX_MODE: manual
+      RAG_CHUNK_FILE_PATTERN: "**/*.jsonl"
+      RAG_DEACTIVATE_MISSING_CHUNKS: "true"
+      RAG_REEMBED_ON_CONTENT_CHANGE: "true"
+      RAG_UPDATE_METADATA_ONLY: "true"
+      RAG_TOP_K: 5
+      VECTOR_DB_PROVIDER: pgvector
+      VECTOR_DATABASE_URL: postgresql://postgres:123456@192.168.80.42:5432/xcmg_rca
+      VECTOR_DB_SCHEMA: public
+      VECTOR_TABLE_NAME: knowledge_embeddings
+      LLM_PROVIDER: openai
+      LLM_MODEL: deepseek-v4-flash
+      LLM_BASE_URL: https://ark.cn-beijing.volces.com/api/coding/v3
+      LLM_API_KEY: d80fdf91-b58a-4d8d-a9af-4d353fa00e2d
+      LLM_TIMEOUT_SECONDS: 60
+      LLM_MAX_RETRIES: 3
+      EMBEDDING_PROVIDER: volces
+      EMBEDDING_MODEL: doubao-embedding-vision
+      EMBEDDING_BASE_URL: https://ark.cn-beijing.volces.com/api/coding/v3
+      EMBEDDING_API_KEY: d80fdf91-b58a-4d8d-a9af-4d353fa00e2d
+      EMBEDDING_DIMENSION: 1024
+      EMBEDDING_BATCH_SIZE: 32
+      RERANKER_PROVIDER: ollama
+      RERANKER_MODEL: dengcao/Qwen3-Reranker-4B:Q4_K_M
+      RERANKER_BASE_URL: http://192.168.80.2:11434
+      RERANKER_API_KEY: ollama
+      RERANKER_TOP_N: 5
+      MAX_REFLECTION_ROUNDS: 3
+      CONFIDENCE_THRESHOLD: 0.7
+      REFLECTION_LOW_SCORE_THRESHOLD: 0.4
+      TEXT2SQL_WHITELIST_TABLES: work_orders,equipment_maintenance,material_inventory,quality_records,interface_logs
+      TEXT2SQL_MAX_LIMIT: 100
+      LOG_LEVEL: INFO
+    ports:
+      - "8000:8000"
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/v1/rca/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s

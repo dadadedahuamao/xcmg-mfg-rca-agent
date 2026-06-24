@@ -1,0 +1,51 @@
+# 排程风险技能定义
+anomaly_type: schedule_risk
+display_name: 排程风险分析
+description: 分析生产排程风险，识别交付延期和产能瓶颈
+
+trigger_type: schedule_risk
+severity: medium
+
+steps:
+  - name: 工单分析
+    description: 分析当前工单状态和进度
+    tools: [workorder]
+  - name: 资源评估
+    description: 评估关键设备和人力资源可用性
+    tools: [resource]
+  - name: 设备检查
+    description: 检查设备维保状态和可用性
+    tools: [equipment_maintenance]
+  - name: 物料检查
+    description: 检查物料供应是否满足排程需求
+    tools: [material]
+  - name: 知识库检索
+    description: 检索排程优化的最佳实践
+    tools: [knowledge]
+
+tools:
+  - workorder
+  - resource
+  - equipment_maintenance
+  - material
+  - knowledge
+
+evidence_rules:
+  - name: 工单延迟证据
+    condition: workorder 返回 status=delayed 且 count > 2
+    weight: 0.3
+  - name: 资源瓶颈证据
+    condition: resource 返回 conflict_count > 0
+    weight: 0.25
+  - name: 设备不可用证据
+    condition: equipment_maintenance 返回 overdue_count > 0
+    weight: 0.25
+  - name: 物料短缺证据
+    condition: material 返回 has_shortage=true
+    weight: 0.2
+
+recommendations:
+  - 优化排程算法
+  - 建立产能瓶颈识别机制
+  - 加强物料供应联动
+  - 设置排程缓冲时间

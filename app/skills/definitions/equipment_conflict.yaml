@@ -1,0 +1,47 @@
+# 设备冲突技能定义
+anomaly_type: equipment_conflict
+display_name: 设备冲突分析
+description: 分析设备资源冲突问题，识别争用设备和冲突时段
+
+trigger_type: equipment_conflict
+severity: high
+
+steps:
+  - name: 冲突识别
+    description: 识别存在资源争用的设备和工位
+    tools: [resource, workorder]
+  - name: 维保计划检查
+    description: 检查设备维保计划是否与生产计划冲突
+    tools: [equipment_maintenance]
+  - name: 产能评估
+    description: 评估设备实际产能与计划产能的差距
+    tools: [workorder, quality]
+  - name: 知识库检索
+    description: 检索设备调度的最佳实践
+    tools: [knowledge]
+
+tools:
+  - workorder
+  - resource
+  - equipment_maintenance
+  - knowledge
+
+evidence_rules:
+  - name: 多工单争用证据
+    condition: resource 返回 conflict_count > 0
+    weight: 0.35
+  - name: 维保冲突证据
+    condition: equipment_maintenance 返回 status=overdue 或 in_progress
+    weight: 0.25
+  - name: 产能不足证据
+    condition: workorder 返回 status=delayed 且 count > 2
+    weight: 0.25
+  - name: 紧急插单证据
+    condition: workorder 返回 priority >= 8
+    weight: 0.15
+
+recommendations:
+  - 优化设备排程算法
+  - 建立维保与生产协调机制
+  - 评估关键设备产能
+  - 建立资源冲突检测机制

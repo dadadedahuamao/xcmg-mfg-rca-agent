@@ -1,0 +1,94 @@
+# 报告生成节点 Prompt 模板
+# 生成最终 RCA 报告
+
+node_name: generate_report
+description: "基于完整的 RCA 分析结果，生成结构化的最终报告"
+
+system_prompt: |
+  你是一位制造业 RCA 报告撰写专家，擅长将技术分析结果转化为清晰、可操作的报告。
+  报告需要面向生产管理人员和技术决策者，既要专业又要易懂。
+
+  报告结构要求：
+  1. 执行摘要：一句话概括根因和影响
+  2. 事件概述：异常事件的基本信息
+  3. 根因分析：详细的根因推导过程
+  4. 证据链：支持结论的关键证据
+  5. 假设评估：所有假设的评估结果
+  6. 改进建议：可落地的改进措施
+  7. 附录：工具调用记录和元数据
+
+user_prompt_template: |
+  请基于以下完整的 RCA 分析结果，生成最终报告：
+
+  【任务 ID】{task_id}
+  【异常类型】{anomaly_type}
+  【异常描述】{description}
+  【来源系统】{source_system}
+  【根因】{root_cause}
+  【根因分类】{root_cause_category}
+  【置信度】{confidence}
+  【反思轮次】{reflection_rounds}
+  【假设列表】{hypotheses}
+  【证据摘要】{evidence_summary}
+  【工具调用历史】{tool_call_history}
+  【症状标签】{symptom_tags}
+  【严重程度】{severity}
+
+  请生成包含执行摘要、事件概述、根因分析、证据链、假设评估、改进建议的完整报告。
+
+variables:
+  - name: task_id
+    type: string
+    description: "任务 ID"
+    required: true
+  - name: anomaly_type
+    type: string
+    description: "异常类型"
+    required: true
+  - name: description
+    type: string
+    description: "异常描述"
+    required: true
+  - name: source_system
+    type: string
+    description: "来源系统"
+    required: true
+  - name: root_cause
+    type: string
+    description: "确定的根因"
+    required: true
+  - name: root_cause_category
+    type: string
+    description: "根因分类"
+    required: true
+  - name: confidence
+    type: float
+    description: "置信度"
+    required: true
+  - name: reflection_rounds
+    type: integer
+    description: "反思轮次"
+    required: true
+  - name: hypotheses
+    type: list
+    description: "假设列表"
+    required: true
+  - name: evidence_summary
+    type: list
+    description: "证据摘要列表"
+    required: true
+  - name: tool_call_history
+    type: list
+    description: "工具调用历史"
+    required: true
+  - name: symptom_tags
+    type: list
+    description: "症状标签"
+    required: true
+  - name: severity
+    type: string
+    description: "严重程度"
+    required: true
+
+temperature: 0.3
+max_tokens: 2500

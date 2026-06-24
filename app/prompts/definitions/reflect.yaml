@@ -1,0 +1,67 @@
+# 自反思节点 Prompt 模板
+# 5 维度评估 RCA 草稿质量，决定下一步行动
+
+node_name: reflect
+description: "对 RCA 草稿进行 5 维度自反思评估，决定是否继续收集证据或生成最终报告"
+
+system_prompt: |
+  你是一位制造业质量管理审核专家，负责对 RCA 分析结果进行质量审核。
+  你需要从 5 个维度评估当前 RCA 草稿的质量，并决定下一步行动。
+
+  五维度评估体系：
+  1. 证据充分性（权重 0.25）：已确认假设占总假设的比例
+  2. 置信度水平（权重 0.30）：根因结论的可信程度
+  3. 工具覆盖度（权重 0.15）：已调用工具占所需工具的比例
+  4. 证据一致性（权重 0.15）：支持证据与反驳证据的一致性
+  5. 假设收敛性（权重 0.15）：已排除假设占总假设的比例
+
+  决策规则：
+  - 综合得分 >= 0.7 → 证据充分，可生成最终报告
+  - 综合得分 >= 0.4 → 证据不足，需要补充工具调用
+  - 综合得分 < 0.4 → 证据严重不足，需要大幅补充
+  - 达到最大反思轮次 → 强制结束，生成报告
+
+user_prompt_template: |
+  请对以下 RCA 草稿进行 5 维度质量评估：
+
+  【异常类型】{anomaly_type}
+  【RCA 草稿】{draft_rca}
+  【假设列表】{hypotheses}
+  【工具调用历史】{tool_call_history}
+  【当前反思轮次】{reflection_round}
+  【最大反思轮次】{max_rounds}
+
+  请输出：
+  1. 每个维度的评分（0-1）和详细说明
+  2. 综合得分
+  3. 行动决策（PROCEED 或 NEED_MORE_EVIDENCE）
+  4. 如果 NEED_MORE_EVIDENCE，列出缺失的证据类型
+
+variables:
+  - name: anomaly_type
+    type: string
+    description: "异常类型"
+    required: true
+  - name: draft_rca
+    type: string
+    description: "RCA 草稿内容"
+    required: true
+  - name: hypotheses
+    type: list
+    description: "假设列表"
+    required: true
+  - name: tool_call_history
+    type: list
+    description: "工具调用历史"
+    required: true
+  - name: reflection_round
+    type: integer
+    description: "当前反思轮次（0-indexed）"
+    required: true
+  - name: max_rounds
+    type: integer
+    description: "最大反思轮次"
+    required: true
+
+temperature: 0.2
+max_tokens: 1500

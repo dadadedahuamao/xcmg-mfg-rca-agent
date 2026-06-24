@@ -1,0 +1,47 @@
+# 接口超时技能定义
+anomaly_type: interface_timeout
+display_name: 接口超时分析
+description: 分析系统间接口超时问题，识别超时接口和根因
+
+trigger_type: interface_timeout
+severity: medium
+
+steps:
+  - name: 日志分析
+    description: 分析接口调用日志，识别超时和失败模式
+    tools: [interface_log]
+  - name: 资源检查
+    description: 检查目标系统资源状态
+    tools: [resource]
+  - name: SQL 分析
+    description: 通过 Text2SQL 分析接口相关数据
+    tools: [text2sql]
+  - name: 知识库检索
+    description: 检索接口配置和故障处理 SOP
+    tools: [knowledge]
+
+tools:
+  - interface_log
+  - resource
+  - text2sql
+  - knowledge
+
+evidence_rules:
+  - name: 超时频率证据
+    condition: interface_log 返回 timeout_count > 0
+    weight: 0.3
+  - name: 失败率证据
+    condition: interface_log 返回 failure_count > 0
+    weight: 0.25
+  - name: 资源不足证据
+    condition: resource 返回 conflict_count > 0
+    weight: 0.2
+  - name: 配置问题证据
+    condition: knowledge 返回 count > 0
+    weight: 0.25
+
+recommendations:
+  - 优化接口超时配置
+  - 建立接口监控告警
+  - 评估目标系统性能
+  - 实施限流和降级方案

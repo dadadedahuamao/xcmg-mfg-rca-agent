@@ -1,0 +1,47 @@
+# 质量异常技能定义
+anomaly_type: quality_abnormal
+display_name: 质量异常分析
+description: 分析产品质量异常问题，识别缺陷类型和根因
+
+trigger_type: quality_abnormal
+severity: high
+
+steps:
+  - name: 缺陷分析
+    description: 分析缺陷类型、分布和不良率
+    tools: [quality]
+  - name: 设备状态检查
+    description: 检查相关设备的运行参数和维保状态
+    tools: [equipment_maintenance]
+  - name: 来料检查
+    description: 检查来料批次质量记录
+    tools: [material]
+  - name: 知识库检索
+    description: 检索质量控制的 SOP 和历史案例
+    tools: [knowledge]
+
+tools:
+  - quality
+  - equipment_maintenance
+  - material
+  - knowledge
+
+evidence_rules:
+  - name: 不良率超标证据
+    condition: quality 返回 defect_rate > 0.05
+    weight: 0.3
+  - name: 设备异常证据
+    condition: equipment_maintenance 返回 status=overdue
+    weight: 0.25
+  - name: 来料问题证据
+    condition: material 返回 has_shortage=true
+    weight: 0.2
+  - name: SOP 违规证据
+    condition: knowledge 返回 count > 0
+    weight: 0.25
+
+recommendations:
+  - 加强设备参数监控
+  - 完善来料检验流程
+  - 强化 SOP 培训
+  - 建立质量快速响应机制

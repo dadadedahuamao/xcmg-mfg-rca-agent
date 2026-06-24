@@ -1,0 +1,51 @@
+# 物料短缺技能定义
+anomaly_type: material_shortage
+display_name: 物料短缺分析
+description: 分析物料短缺问题，识别短缺物料和根因
+
+trigger_type: material_shortage
+severity: critical
+
+steps:
+  - name: 库存检查
+    description: 检查物料库存和安全库存状态
+    tools: [material]
+  - name: 工单需求分析
+    description: 分析当前工单的物料需求
+    tools: [workorder]
+  - name: 接口日志检查
+    description: 检查供应商接口和物流接口状态
+    tools: [interface_log]
+  - name: 质量检查
+    description: 检查是否存在物料质量问题导致退回
+    tools: [quality]
+  - name: 知识库检索
+    description: 检索物料管理的 SOP
+    tools: [knowledge]
+
+tools:
+  - material
+  - workorder
+  - interface_log
+  - quality
+  - knowledge
+
+evidence_rules:
+  - name: 库存不足证据
+    condition: material 返回 quantity <= safety_stock
+    weight: 0.3
+  - name: 需求突增证据
+    condition: workorder 返回 status=pending 且 count > 5
+    weight: 0.2
+  - name: 接口异常证据
+    condition: interface_log 返回 failure_count > 0
+    weight: 0.25
+  - name: 质量退回证据
+    condition: quality 返回 defect_rate > 0.05
+    weight: 0.25
+
+recommendations:
+  - 优化安全库存设置
+  - 建立供应商交付预警
+  - 加强物料需求联动
+  - 评估替代物料方案

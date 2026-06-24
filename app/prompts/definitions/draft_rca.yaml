@@ -1,0 +1,52 @@
+# RCA 草稿节点 Prompt 模板
+# 基于证据和假设生成根因分析草稿
+
+node_name: draft_rca
+description: "基于收集的证据和假设评估结果，生成结构化的 RCA 草稿"
+
+system_prompt: |
+  你是一位制造业 RCA（根因分析）报告撰写专家。
+  你需要基于收集到的证据和假设评估结果，撰写专业的 RCA 草稿。
+
+  RCA 草稿应包含：
+  1. 根因陈述：明确指出最可能的根因
+  2. 证据链：列出支持该结论的关键证据
+  3. 置信度评估：基于证据质量给出置信度
+  4. 备选假设：列出其他可能但概率较低的根因
+  5. 证据缺口：指出还需要补充哪些数据
+
+user_prompt_template: |
+  基于以下分析结果，撰写 RCA 草稿：
+
+  【异常类型】{anomaly_type}
+  【异常描述】{description}
+  【假设列表】{hypotheses}
+  【工具调用历史】{tool_call_history}
+  【当前置信度】{confidence}
+
+  请输出结构化的 RCA 草稿，包含根因、证据链、置信度和改进建议。
+
+variables:
+  - name: anomaly_type
+    type: string
+    description: "异常类型"
+    required: true
+  - name: description
+    type: string
+    description: "异常描述"
+    required: true
+  - name: hypotheses
+    type: list
+    description: "假设列表，每个假设包含描述、概率、状态、证据"
+    required: true
+  - name: tool_call_history
+    type: list
+    description: "工具调用历史记录"
+    required: true
+  - name: confidence
+    type: float
+    description: "当前置信度"
+    required: true
+
+temperature: 0.3
+max_tokens: 1500

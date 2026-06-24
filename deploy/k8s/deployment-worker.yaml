@@ -1,0 +1,35 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: rca-worker
+  namespace: xcmg-rca
+  labels:
+    app: rca-worker
+    app.kubernetes.io/name: xcmg-mfg-rca-agent
+spec:
+  replicas: 2
+  selector:
+    matchLabels:
+      app: rca-worker
+  template:
+    metadata:
+      labels:
+        app: rca-worker
+    spec:
+      containers:
+        - name: worker
+          image: xcmg-mfg-rca-agent:latest
+          imagePullPolicy: IfNotPresent
+          command: ["python", "-c", "import time; print('Worker standby...'); time.sleep(3600)"]
+          envFrom:
+            - configMapRef:
+                name: rca-config
+            - secretRef:
+                name: rca-secrets
+          resources:
+            requests:
+              cpu: 100m
+              memory: 256Mi
+            limits:
+              cpu: 500m
+              memory: 512Mi
