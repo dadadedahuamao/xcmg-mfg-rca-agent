@@ -282,7 +282,7 @@ curl http://localhost:8000/api/v1/rca/health
 
 ## K8s 部署
 
-`k8s/` 目录包含完整的 Kubernetes 部署清单：
+`deploy/k8s/` 目录包含完整的 Kubernetes 部署清单：
 
 | 文件 | 说明 |
 |------|------|
@@ -300,47 +300,57 @@ curl http://localhost:8000/api/v1/rca/health
 部署命令：
 
 ```bash
-kubectl apply -f k8s/namespace.yaml
-kubectl apply -f k8s/configmap.yaml
-kubectl apply -f k8s/secret.example.yaml
-kubectl apply -f k8s/redis-deployment.yaml
-kubectl apply -f k8s/postgres-statefulset.yaml
-kubectl apply -f k8s/deployment-api.yaml
-kubectl apply -f k8s/service.yaml
-kubectl apply -f k8s/ingress.yaml
-kubectl apply -f k8s/hpa.yaml
+kubectl apply -f deploy/k8s/namespace.yaml
+kubectl apply -f deploy/k8s/configmap.yaml
+kubectl apply -f deploy/k8s/secret.example.yaml
+kubectl apply -f deploy/k8s/redis-deployment.yaml
+kubectl apply -f deploy/k8s/postgres-statefulset.yaml
+kubectl apply -f deploy/k8s/deployment-api.yaml
+kubectl apply -f deploy/k8s/service.yaml
+kubectl apply -f deploy/k8s/ingress.yaml
+kubectl apply -f deploy/k8s/hpa.yaml
 ```
 
 ## 项目结构
 
 ```
-XCMG-MFG-RCA-Agent/
-├── README.md
-├── pyproject.toml
-├── .env.example
-├── Dockerfile
-├── docker-compose.yml
-├── k8s/                          # Kubernetes 部署清单
-├── app/
-│   ├── __init__.py
-│   ├── main.py                   # FastAPI 应用入口
-│   ├── config.py                 # 配置管理
-│   ├── api/
-│   │   └── routes.py             # API 路由
-│   ├── agent/
-│   │   ├── state.py              # RCAState 定义
-│   │   ├── workflow.py           # RCAWorkflow 编排器
-│   │   └── nodes/                # 8 个工作流节点
-│   ├── tools/                    # MCP 风格工具
-│   ├── skills/                   # Skills SOP 定义
-│   │   └── definitions/          # 6 个 YAML 技能文件
-│   ├── rag/                      # RAG 混合检索
-│   ├── text2sql/                 # Text2SQL 安全查询
-│   ├── persistence/              # PostgreSQL 持久化
-│   ├── schemas/                  # Pydantic 数据模型
-│   ├── data/                     # 示例数据和知识文档
-│   ├── scripts/                  # 工具脚本
-│   └── tests/                    # 测试
+xcmg-mfg-rca-agent/
+├── README.md                      # 项目说明文档
+├── pyproject.toml                 # 项目元数据与依赖声明
+├── uv.lock                        # uv 依赖锁文件
+├── .env.example                   # 环境变量模板
+├── .dockerignore                  # Docker 构建忽略规则
+├── .gitignore                     # Git 忽略规则
+├── app/                           # 应用主代码
+│   ├── main.py                    # FastAPI 应用入口
+│   ├── config.py                  # 配置管理
+│   ├── api/                       # API 路由与聊天执行逻辑
+│   │   ├── routes.py              # RCA 分析 REST 接口
+│   │   ├── chat_routes.py         # 聊天 REST 接口
+│   │   └── chat_execute.py        # 聊天执行逻辑
+│   ├── agent/                     # RCA 工作流引擎
+│   │   ├── state.py               # RCAState 状态定义
+│   │   ├── graph.py               # LangGraph 风格图构建
+│   │   ├── workflow.py            # RCAWorkflow 编排器
+│   │   └── nodes/                 # 8 个工作流节点
+│   ├── tools/                     # MCP 风格工具系统
+│   ├── skills/                    # Skills SOP 知识库
+│   │   └── definitions/           # 6 种异常类型 YAML SOP
+│   ├── rag/                       # RAG 混合检索、Embedding、pgvector、Reranker
+│   ├── text2sql/                  # Text2SQL 生成、验证与执行
+│   ├── llm/                       # OpenAI-compatible LLM 客户端
+│   ├── prompts/                   # 提示词模板与 YAML 定义
+│   ├── persistence/               # PostgreSQL 持久化、检查点、聊天仓储
+│   ├── schemas/                   # Pydantic 请求/响应与业务模型
+│   ├── data/                      # 应用内示例数据与知识文档
+│   ├── scripts/                   # 初始化、演示、冒烟测试和向量入库脚本
+│   └── tests/                     # 单元测试与集成测试
+├── db/                            # 数据库初始化 SQL 脚本
+├── deploy/                        # 容器化部署配置
+│   ├── docker/                    # Dockerfile、Compose 模板与部署脚本
+│   └── k8s/                       # Kubernetes 部署清单
+├── static/                        # 前端聊天 UI 静态资源
+└── scripts/                       # 根目录辅助脚本
 ```
 
 ## 面试边界说明
