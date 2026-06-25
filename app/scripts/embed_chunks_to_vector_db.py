@@ -1,7 +1,7 @@
 """将 data/chunks 分片向量化后写入 PostgreSQL/pgvector。
 
 使用项目 .env 中的 EMBEDDING_*、VECTOR_* 配置。
-目标表结构见 db/002_init_vector_schema.sql 的 knowledge_embeddings。
+目标表结构见 db/004_init_vector_schema.sql 的 knowledge_embeddings。
 """
 
 from __future__ import annotations
