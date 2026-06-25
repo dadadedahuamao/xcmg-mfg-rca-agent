@@ -13,7 +13,7 @@ XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis
 ### 核心特性
 
 - **8 节点 RCA 工作流**：`analyze_symptom → generate_hypotheses → select_tool → execute_tool → observe_evidence → draft_rca → reflect → generate_report`，支持反思循环
-- **MCP 风格工具系统**：工单查询、设备维保、物料库存、接口日志、质量记录、知识检索、Text2SQL
+- **MCP 风格工具系统**：8 个工具（工单查询、资源调度、设备维保、物料库存、接口日志、质量记录、知识检索、Text2SQL）
 - **Skills SOP 配置**：6 种异常类型的 YAML 定义（超站检查、设备冲突、物料短缺、质量异常、接口超时、排程风险）
 - **RAG 混合检索**：关键词召回 + 真实 Embedding 向量检索 + Reranker 重排序
 - **Text2SQL 安全查询**：只读 SELECT 生成 + 白名单验证 + PostgreSQL 执行
@@ -74,7 +74,7 @@ XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis
 |------|------|------|
 | 工作流 | 8 节点 LangGraph 风格 RCA 工作流 | ✅ |
 | 工作流 | 反思循环（最多 3 轮） | ✅ |
-| 工具 | 7 个 MCP 风格工具（工单/资源/物料/接口/质量/知识/Text2SQL） | ✅ |
+| 工具 | 8 个 MCP 风格工具（工单/资源/设备维保/物料/接口/质量/知识/Text2SQL） | ✅ |
 | 工具 | 工具注册中心（单例模式） | ✅ |
 | Skills | 6 种异常类型 YAML SOP 定义 | ✅ |
 | RAG | 混合检索（关键词 + Embedding 向量 + Reranker 重排序） | ✅ |
@@ -86,11 +86,11 @@ XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis
 | Text2SQL | PostgreSQL 执行器 | ✅ |
 | 持久化 | PostgreSQL 任务/报告/检查点/去重表 | ✅ |
 | 持久化 | 检查点保存和恢复 | ✅ |
-| API | FastAPI 4 个端点（health/analyze/reports/tasks） | ✅ |
+| API | FastAPI 6 个端点（health/analyze/reports/tasks/events/chat） | ✅ |
 | 部署 | Dockerfile + docker-compose.yml | ✅ |
 | 部署 | K8s manifests（Deployment/Service/Ingress/HPA/ConfigMap） | ✅ |
 | 数据 | 示例 MES/APS/WMS/QMS 数据 | ✅ |
-| 测试 | 冒烟测试和单元测试 | ✅ |
+| 测试 | pytest 单元测试、集成测试与冒烟测试 | ✅ |
 
 ## 计划功能
 
@@ -111,7 +111,7 @@ XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis
 
 - Python 3.10+
 - pip
-- PostgreSQL 14+（本地或 Docker Compose）
+- 外部 PostgreSQL 14+（需安装 pgvector 扩展）
 
 ### 1. 安装依赖
 
@@ -120,9 +120,10 @@ python -m venv .venv
 .\.venv\Scripts\Activate.ps1
 python -m pip install -U pip
 python -m pip install -e .
+python -m pip install -e ".[dev]"
 ```
 
-项目依赖统一维护在 `pyproject.toml` 中，`python -m pip install -e .` 会自动同步安装 `[project] dependencies` 中声明的所有运行时依赖。
+项目依赖统一维护在 `pyproject.toml` 中，`python -m pip install -e .` 会自动同步安装 `[project] dependencies` 中声明的所有运行时依赖；`python -m pip install -e ".[dev]"` 会额外安装 pytest 等测试依赖。
 
 ### 2. 配置 PostgreSQL 与大模型
 
@@ -131,6 +132,8 @@ python -m pip install -e .
 ```env
 DATABASE_URL=postgresql://rca_user:rca_password@localhost:5432/xcmg_rca
 DATABASE_SCHEMA=rca
+BUSINESS_DATABASE_URL=postgresql://rca_user:rca_password@localhost:5432/xcmg_rca
+BUSINESS_DATABASE_SCHEMA=public
 LLM_API_KEY=sk-your-key-here
 EMBEDDING_API_KEY=sk-your-key-here
 VECTOR_DB_PROVIDER=pgvector
@@ -145,17 +148,16 @@ VECTOR_DB_SCHEMA=rca_vector
 ```powershell
 psql "postgresql://rca_user:rca_password@localhost:5432/xcmg_rca" -f db/001_init_app_schema.sql
 psql "postgresql://rca_user:rca_password@localhost:5432/xcmg_rca" -f db/002_init_business_schema.sql
-psql "postgresql://rca_user:rca_password@localhost:5432/xcmg_rca" -f db/004_init_vector_schema.sql
 psql "postgresql://rca_user:rca_password@localhost:5432/xcmg_rca" -f db/003_init_metadata_seed.sql
+psql "postgresql://rca_user:rca_password@localhost:5432/xcmg_rca" -f db/004_init_vector_schema.sql
 ```
 
 其中：
 
 - `db/001_init_app_schema.sql` 创建 RCA 应用表（任务、报告、反馈、检查点、聊天）和元数据层表（数据源、表结构、字段含义、业务术语等）。
 - `db/002_init_business_schema.sql` 创建示例业务表（工单、设备维保、物料库存、质量记录、接口日志），仅用于本地开发/演示。
-- `db/004_init_vector_schema.sql` 启用 `pgvector` 扩展并创建向量表（时间戳默认值已统一为日期零点精度）。
 - `db/003_init_metadata_seed.sql` 插入元数据初始数据（数据源、字段映射、业务术语、关联关系、指标定义、查询模板）。
-- 使用 Docker Compose 首次创建 PostgreSQL 数据卷时，`db/` 目录会挂载到容器初始化目录自动执行；已有数据卷不会重复执行。
+- `db/004_init_vector_schema.sql` 启用 `pgvector` 扩展并创建向量表（时间戳默认值已统一为日期零点精度）。
 
 ### 4. 插入示例数据
 
@@ -223,9 +225,28 @@ curl -X POST http://localhost:8000/api/v1/rca/analyze \
 ```json
 {
   "task_id": "rca-a1b2c3d4e5f6",
-  "status": "completed",
-  "message": "RCA 分析完成，置信度: 85%"
+  "status": "pending",
+  "events_url": "/api/v1/rca/events/rca-a1b2c3d4e5f6"
 }
+```
+
+### SSE 流式事件
+
+```bash
+curl http://localhost:8000/api/v1/rca/events/rca-a1b2c3d4e5f6
+```
+
+服务端以 `text/event-stream` 格式推送工作流状态、工具执行和反思循环的实时事件。
+
+### 聊天交互
+
+```bash
+curl -X POST http://localhost:8000/api/v1/rca/chat \
+  -H "Content-Type: application/json" \
+  -d '{
+    "task_id": "rca-a1b2c3d4e5f6",
+    "message": "为什么根因是物料短缺？"
+  }'
 ```
 
 ### 查询报告
@@ -242,33 +263,65 @@ curl http://localhost:8000/api/v1/rca/tasks/rca-a1b2c3d4e5f6
 
 ## Docker Compose 使用
 
-Docker Compose 只部署 RCA API，PostgreSQL 使用现成外部数据库。部署前复制 `.env.example` 为 `.env`，然后修改数据库和大模型参数：
+Docker Compose 配置位于 `deploy/docker/docker-compose.yml`，当前只部署 `api` 服务；PostgreSQL、LLM、Embedding 和 Reranker 均使用外部服务。部署前先复制 `.env.example` 为 `.env`，并按实际环境修改参数。
 
-- `DATABASE_URL`、`BUSINESS_DATABASE_URL`、`VECTOR_DATABASE_URL` 均需指向容器可访问的 PostgreSQL 地址。
-- 三个 PostgreSQL URL 只填连接信息，schema 由 `DATABASE_SCHEMA`、`BUSINESS_DATABASE_SCHEMA`、`VECTOR_DB_SCHEMA` 单独控制。
-- 大模型相关参数按实际服务修改 `LLM_*`、`EMBEDDING_*`、`RERANKER_*`。
+关键配置：
+
+- `API_PORT`：宿主机暴露端口，默认 `8000`。
+- `DATABASE_URL` / `DATABASE_SCHEMA`：RCA 任务、报告、检查点等应用数据存储。
+- `BUSINESS_DATABASE_URL` / `BUSINESS_DATABASE_SCHEMA`：Text2SQL 和业务工具查询的业务库。
+- `VECTOR_DB_PROVIDER` / `VECTOR_DATABASE_URL` / `VECTOR_DB_SCHEMA` / `VECTOR_TABLE_NAME`：知识库向量存储，默认使用 `pgvector`。
+- `RAG_SOURCE_DIR` / `RAG_CHUNKS_DIR` / `RAG_INDEX_MODE`：知识文档来源、人工确认分块目录和索引模式。
+- `LLM_*`、`EMBEDDING_*`、`RERANKER_*`：分别配置大模型、向量模型和重排序模型。
 
 示例：
 
 ```env
+API_PORT=8000
+
 DATABASE_URL=postgresql://rca_user:rca_password@postgres.example.com:5432/xcmg_rca
+DATABASE_SCHEMA=rca
 BUSINESS_DATABASE_URL=postgresql://rca_user:rca_password@postgres.example.com:5432/xcmg_rca
+BUSINESS_DATABASE_SCHEMA=public
+
+VECTOR_DB_PROVIDER=pgvector
 VECTOR_DATABASE_URL=postgresql://rca_user:rca_password@postgres.example.com:5432/xcmg_rca
-LLM_PROVIDER=compatible
-LLM_MODEL=your-model
-LLM_BASE_URL=https://your-llm-endpoint/v1
-LLM_API_KEY=your-api-key
-EMBEDDING_PROVIDER=compatible
-EMBEDDING_MODEL=your-embedding-model
-EMBEDDING_BASE_URL=https://your-embedding-endpoint/v1
-EMBEDDING_API_KEY=your-api-key
-RERANKER_PROVIDER=compatible
-RERANKER_MODEL=your-reranker-model
-RERANKER_BASE_URL=https://your-reranker-endpoint
-RERANKER_API_KEY=your-api-key
+VECTOR_DB_SCHEMA=rca_vector
+VECTOR_TABLE_NAME=knowledge_embeddings
+
+RAG_SOURCE_DIR=./app/data/knowledge/raw
+RAG_CHUNKS_DIR=./app/data/knowledge/chunks
+RAG_INDEX_MODE=manual
+RAG_CHUNK_FILE_PATTERN=**/*.jsonl
+
+LLM_PROVIDER=openai
+LLM_MODEL=gpt-4o-mini
+LLM_BASE_URL=https://api.openai.com/v1
+LLM_API_KEY=sk-your-key-here
+LLM_TIMEOUT_SECONDS=60
+LLM_MAX_RETRIES=3
+
+EMBEDDING_PROVIDER=ollama
+EMBEDDING_MODEL=bge-m3
+EMBEDDING_BASE_URL=http://localhost:11434/v1
+EMBEDDING_API_KEY=
+EMBEDDING_DIMENSION=1024
+EMBEDDING_BATCH_SIZE=32
+
+RERANKER_PROVIDER=ollama
+RERANKER_MODEL=dengcao/Qwen3-Reranker-4B:Q4_K_M
+RERANKER_BASE_URL=http://localhost:11434
+RERANKER_API_KEY=ollama
+RERANKER_TOP_N=5
 ```
 
-必须从 `deploy/docker` 目录启动，并显式传入根目录 `.env`，这样 Compose 变量替换和 API 容器环境变量会使用同一份配置：
+从仓库根目录启动：
+
+```bash
+docker compose --env-file .env -f deploy/docker/docker-compose.yml up -d --build
+```
+
+或进入 `deploy/docker` 目录启动：
 
 ```bash
 docker compose --env-file ../../.env up -d --build
@@ -290,7 +343,7 @@ curl http://localhost:8000/api/v1/rca/health
 | `configmap.yaml` | 应用配置 |
 | `secret.example.yaml` | 密钥示例（生产环境需替换） |
 | `deployment-api.yaml` | API 服务 Deployment |
-| `deployment-worker.yaml` | Worker 服务 Deployment |
+| `deployment-worker.yaml` | Worker 服务 Deployment（占位/预留） |
 | `service.yaml` | ClusterIP Service |
 | `ingress.yaml` | Ingress 路由 |
 | `postgres-statefulset.yaml` | PostgreSQL StatefulSet |
