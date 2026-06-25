@@ -79,6 +79,8 @@ XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis
 | Skills | 6 种异常类型 YAML SOP 定义 | ✅ |
 | RAG | 混合检索（关键词 + Embedding 向量 + Reranker 重排序） | ✅ |
 | RAG | Markdown 知识文档加载和分块 | ✅ |
+| LLM | 接入大语言模型增强假设生成和报告质量 | ✅ |
+| pgvector | 使用 PostgreSQL/pgvector 保存知识库 Embedding 向量 | ✅ |
 | Text2SQL | 模板驱动 SQL 生成 | ✅ |
 | Text2SQL | 安全验证（只读 SELECT + 白名单 + LIMIT） | ✅ |
 | Text2SQL | PostgreSQL 执行器 | ✅ |
@@ -101,8 +103,6 @@ XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis
 | 真实系统集成 | 对接实际 MES/APS/WMS/QMS 系统 API |
 | 多租户 | 支持多工厂/多组织隔离 |
 | 趋势分析 | 基于历史 RCA 数据的根因趋势和模式挖掘 |
-| LLM 集成 | 接入大语言模型增强假设生成和报告质量 | ✅ |
-| pgvector | 使用 PostgreSQL/pgvector 保存知识库 Embedding 向量 | ✅ |
 | 实时监控 | WebSocket 推送工作流执行状态 |
 
 ## 快速开始
