@@ -161,23 +161,25 @@ def execute_by_intent(intent: str, message: str) -> ChatExecuteResponse:
         return _execute_general_chat(message)
 
 
-def _execute_knowledge_query(message: str, top_k: int = 5) -> ChatExecuteResponse:
+def _execute_knowledge_query(message: str, top_k: int | None = None) -> ChatExecuteResponse:
     """执行知识库查询。
 
     复用 HybridRetriever.search() 检索知识库，
     然后用 LLM 生成可读回答，包含每条记录为什么相关。
     """
     from app.rag.hybrid_retriever import HybridRetriever
+    from app.config import settings
 
+    resolved_top_k = top_k or settings.rag_top_k
     retriever = HybridRetriever()
-    results = retriever.search(query=message, anomaly_type="", top_k=top_k)
+    results = retriever.search(query=message, anomaly_type="", top_k=resolved_top_k)
 
     if not results:
         return ChatExecuteResponse(
             intent=INTENT_KNOWLEDGE_QUERY,
             content="未找到相关知识库内容，请尝试调整查询关键词。",
             items=[],
-            metadata={"top_k": top_k, "count": 0},
+            metadata={"top_k": resolved_top_k, "count": 0},
         )
 
     # 构建 items 列表（结构化结果）
@@ -208,7 +210,7 @@ def _execute_knowledge_query(message: str, top_k: int = 5) -> ChatExecuteRespons
         intent=INTENT_KNOWLEDGE_QUERY,
         content=content,
         items=items,
-        metadata={"top_k": top_k, "count": len(items)},
+        metadata={"top_k": resolved_top_k, "count": len(items)},
     )
 
 

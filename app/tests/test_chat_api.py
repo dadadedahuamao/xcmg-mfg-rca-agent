@@ -837,3 +837,34 @@ def test_chat_execute_rca_does_not_call_analyze_api():
     assert resp.route == "rca"
     # 确认 content 不包含 task_id（说明没有启动工作流）
     assert "task_id" not in resp.content.lower()
+
+
+def test_knowledge_query_default_top_k_uses_rag_config(monkeypatch):
+    from unittest.mock import Mock
+
+    import app.api.chat_execute as chat_execute
+    import app.config
+
+    monkeypatch.setattr(app.config.settings, "rag_top_k", 7)
+    monkeypatch.setattr(
+        chat_execute,
+        "_generate_knowledge_answer",
+        Mock(return_value="测试知识库回答"),
+    )
+
+    search = Mock(return_value=[
+        {
+            "content": "设备维保逾期可能导致工位超站",
+            "source": "SOP-001",
+            "hybrid_score": 0.8,
+            "anomaly_type": "overstation_check",
+        }
+    ])
+    retriever = Mock()
+    retriever.search = search
+    monkeypatch.setattr("app.rag.hybrid_retriever.HybridRetriever", Mock(return_value=retriever))
+
+    response = chat_execute._execute_knowledge_query("查询工位超站知识")
+
+    search.assert_called_once_with(query="查询工位超站知识", anomaly_type="", top_k=7)
+    assert response.metadata == {"top_k": 7, "count": 1}
