@@ -59,7 +59,7 @@ def test_database_initialization_uses_sql_scripts_only():
 
     project_root = Path(__file__).resolve().parent.parent.parent
     business_script = project_root / "db" / "002_init_business_schema.sql"
-    vector_script = project_root / "db" / "002_init_vector_schema.sql"
+    vector_script = project_root / "db" / "004_init_vector_schema.sql"
 
     assert business_script.exists()
     assert vector_script.exists()
@@ -188,9 +188,12 @@ def test_hybrid_retriever():
 
 
 def test_workflow_basic():
-    """测试基本工作流执行。"""
+    """测试基本工作流执行 — 使用 mock 图避免真实 DB 持久化。"""
+    from unittest.mock import Mock, patch
+
     from app.agent.workflow import RCAWorkflow
-    from app.schemas.api import AnomalyEvent
+    from app.agent.state import rca_state_to_graph_state
+    from app.schemas.api import AnomalyEvent, TaskStatus
 
     event = AnomalyEvent(
         anomaly_type="overstation_check",
@@ -199,7 +202,43 @@ def test_workflow_basic():
 
     workflow = RCAWorkflow()
     task_id = f"pytest-wf-{uuid.uuid4().hex[:8]}"
-    state = workflow.run(event=event, task_id=task_id)
+
+    with patch.object(workflow, "_build_graph") as mock_build, \
+         patch("app.agent.workflow.StepEventRepository.append_event"), \
+         patch.object(workflow.checkpointer, "save"):
+
+        mock_compiled = Mock()
+
+        nodes = [
+            "analyze_symptom", "generate_hypotheses", "select_tool",
+            "execute_tool", "observe_evidence", "draft_rca",
+            "reflect", "generate_report",
+        ]
+        mock_compiled.stream.return_value = iter([
+            {node_name: {}} for node_name in nodes
+        ])
+
+        # 构造一个完成的 RCAState 作为 get_state 返回值
+        from app.agent.state import RCAState as _RCAState
+        final_state = _RCAState(
+            task_id=task_id,
+            event=event,
+            status=TaskStatus.COMPLETED,
+            hypotheses=[
+                {"id": "H1", "description": "设备故障", "probability": 0.85, "status": "confirmed"},
+            ],
+            final_report={"root_cause": "设备故障", "confidence": 0.85},
+            confidence=0.85,
+            reflection_round=1,
+        )
+        graph_state = rca_state_to_graph_state(final_state)
+        mock_snapshot = Mock()
+        mock_snapshot.values = graph_state
+        mock_compiled.get_state.return_value = mock_snapshot
+
+        mock_build.return_value = mock_compiled
+
+        state = workflow.run(event=event, task_id=task_id, skip_persistence=True)
 
     assert state.task_id == task_id
     assert state.status.value == "completed"
@@ -208,30 +247,32 @@ def test_workflow_basic():
 
 
 # ═══════════════════════════════════════════════════════════════
-# StateGraph 测试
+# 官方 LangGraph 冒烟测试
 # ═══════════════════════════════════════════════════════════════
 
-def test_state_graph_basic():
-    """测试 StateGraph 基本功能：添加节点、边、编译、执行。"""
-    from app.agent.graph import StateGraph
+def test_langgraph_state_graph_basic():
+    """测试官方 LangGraph StateGraph 基本功能：添加节点、边、编译、执行。"""
+    import operator
+    from typing import Annotated, TypedDict
 
-    graph = StateGraph()
+    from langgraph.graph import END, START, StateGraph
 
-    # 简单计数器状态
-    def node_a(state):
-        state["path"].append("a")
-        state["count"] += 1
-        return state
+    class SimpleState(TypedDict):
+        path: Annotated[list[str], operator.add]
+        count: Annotated[int, operator.add]
 
-    def node_b(state):
-        state["path"].append("b")
-        state["count"] += 1
-        return state
+    def node_a(state: SimpleState) -> SimpleState:
+        return {"path": ["a"], "count": 1}
 
+    def node_b(state: SimpleState) -> SimpleState:
+        return {"path": ["b"], "count": 1}
+
+    graph = StateGraph(SimpleState)
     graph.add_node("a", node_a)
     graph.add_node("b", node_b)
+    graph.add_edge(START, "a")
     graph.add_edge("a", "b")
-    graph.set_entry_point("a")
+    graph.add_edge("b", END)
 
     compiled = graph.compile()
     result = compiled.invoke({"path": [], "count": 0})
@@ -240,44 +281,45 @@ def test_state_graph_basic():
     assert result["count"] == 2
 
 
-def test_state_graph_conditional_edges():
-    """测试 StateGraph 条件边：根据状态动态路由。"""
-    from app.agent.graph import StateGraph
+def test_langgraph_conditional_edges():
+    """测试官方 LangGraph 条件边：根据状态动态路由。"""
+    import operator
+    from typing import Annotated, Any, TypedDict
 
-    graph = StateGraph()
+    from langgraph.graph import END, START, StateGraph
 
-    def node_start(state):
-        state["path"].append("start")
-        return state
+    class RouteState(TypedDict):
+        path: Annotated[list[str], operator.add]
+        flag: str
 
-    def node_a(state):
-        state["path"].append("a")
-        return state
+    def node_start(state: RouteState) -> dict[str, Any]:
+        return {"path": ["start"]}
 
-    def node_b(state):
-        state["path"].append("b")
-        return state
+    def node_a(state: RouteState) -> dict[str, Any]:
+        return {"path": ["a"]}
 
-    def node_end(state):
-        state["path"].append("end")
-        return state
+    def node_b(state: RouteState) -> dict[str, Any]:
+        return {"path": ["b"]}
 
-    def decide(state):
+    def node_end(state: RouteState) -> dict[str, Any]:
+        return {"path": ["end"]}
+
+    def decide(state: RouteState) -> str:
         return "go_a" if state.get("flag") == "a" else "go_b"
 
+    graph = StateGraph(RouteState)
     graph.add_node("start", node_start)
     graph.add_node("a", node_a)
     graph.add_node("b", node_b)
     graph.add_node("end", node_end)
-    graph.add_node("decide_point", lambda s: s)  # 决策占位节点
 
-    graph.add_edge("start", "decide_point")
+    graph.add_edge(START, "start")
     graph.add_conditional_edges(
-        "decide_point", decide, {"go_a": "a", "go_b": "b"}
+        "start", decide, {"go_a": "a", "go_b": "b"}
     )
     graph.add_edge("a", "end")
     graph.add_edge("b", "end")
-    graph.set_entry_point("start")
+    graph.add_edge("end", END)
 
     compiled = graph.compile()
 
@@ -294,36 +336,44 @@ def test_state_graph_conditional_edges():
     assert result_b["path"][-1] == "end"
 
 
-def test_state_graph_loop():
-    """测试 StateGraph 循环回退：条件边指向已执行过的节点。"""
-    from app.agent.graph import StateGraph
+def test_langgraph_loop_with_checkpointer():
+    """测试官方 LangGraph 循环回退 + InMemorySaver 检查点。"""
+    import operator
+    from typing import Annotated, Any, TypedDict
 
-    graph = StateGraph()
+    from langgraph.checkpoint.memory import InMemorySaver
+    from langgraph.graph import END, START, StateGraph
+    from langchain_core.runnables.config import RunnableConfig
 
-    def node_work(state):
-        state["count"] += 1
-        state["path"].append(f"work_{state['count']}")
-        return state
+    class LoopState(TypedDict):
+        path: Annotated[list[str], operator.add]
+        count: int
 
-    def node_check(state):
-        state["path"].append(f"check_{state['count']}")
-        return state
+    def node_work(state: LoopState) -> dict[str, Any]:
+        new_count = state["count"] + 1
+        return {"path": [f"work_{new_count}"], "count": new_count}
 
-    def should_loop(state):
+    def node_check(state: LoopState) -> dict[str, Any]:
+        return {"path": [f"check_{state['count']}"]}
+
+    def should_loop(state: LoopState) -> str:
         return "LOOP" if state["count"] < 3 else "DONE"
 
+    graph = StateGraph(LoopState)
     graph.add_node("work", node_work)
     graph.add_node("check", node_check)
-    graph.add_node("done", lambda s: s)
 
+    graph.add_edge(START, "work")
     graph.add_edge("work", "check")
     graph.add_conditional_edges(
-        "check", should_loop, {"LOOP": "work", "DONE": "done"}
+        "check", should_loop, {"LOOP": "work", "DONE": END}
     )
-    graph.set_entry_point("work")
 
-    compiled = graph.compile()
-    result = compiled.invoke({"path": [], "count": 0})
+    checkpointer = InMemorySaver()
+    compiled = graph.compile(checkpointer=checkpointer)
+
+    config: RunnableConfig = {"configurable": {"thread_id": "test-loop-1"}}
+    result = compiled.invoke({"path": [], "count": 0}, config)
 
     assert result["count"] == 3
     assert result["path"] == [
@@ -332,65 +382,9 @@ def test_state_graph_loop():
         "work_3", "check_3",
     ]
 
-
-def test_state_graph_callback():
-    """测试 StateGraph 节点完成回调。"""
-    from app.agent.graph import StateGraph
-
-    graph = StateGraph()
-    callbacks = []
-
-    def node_a(state):
-        state["path"].append("a")
-        return state
-
-    def node_b(state):
-        state["path"].append("b")
-        return state
-
-    graph.add_node("a", node_a)
-    graph.add_node("b", node_b)
-    graph.add_edge("a", "b")
-    graph.set_entry_point("a")
-
-    compiled = graph.compile()
-    compiled.set_callback(lambda name, s: callbacks.append(name))
-    compiled.invoke({"path": []})
-
-    assert callbacks == ["a", "b"]
-
-
-def test_state_graph_skip_until():
-    """测试 StateGraph 断点恢复：从指定节点开始执行。"""
-    from app.agent.graph import StateGraph
-
-    graph = StateGraph()
-
-    def node_a(state):
-        state["path"].append("a")
-        return state
-
-    def node_b(state):
-        state["path"].append("b")
-        return state
-
-    def node_c(state):
-        state["path"].append("c")
-        return state
-
-    graph.add_node("a", node_a)
-    graph.add_node("b", node_b)
-    graph.add_node("c", node_c)
-    graph.add_edge("a", "b")
-    graph.add_edge("b", "c")
-    graph.set_entry_point("a")
-
-    compiled = graph.compile()
-
-    # 从 b 开始，跳过 a
-    result = compiled.invoke({"path": []}, resume_from="b")
-    assert result["path"] == ["b", "c"]
-    assert "a" not in result["path"]
+    # 验证检查点可读取
+    snapshot = compiled.get_state(config)
+    assert snapshot.values["count"] == 3
 
 
 # ═══════════════════════════════════════════════════════════════

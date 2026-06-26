@@ -1,4 +1,4 @@
-"""RCA 工作流编排器 - 基于 StateGraph 的图编排工作流。
+"""RCA 工作流编排器 - 基于官方 LangGraph 的图编排工作流。
 
 节点拓扑：
     analyze_symptom → generate_hypotheses → select_tool → execute_tool
@@ -8,35 +8,37 @@
                          └── NEED_MORE_EVIDENCE ──┘ (回退到 select_tool)
 
 支持：
-- StateGraph 图编排（非简单 for 循环）
+- 官方 LangGraph StateGraph 图编排
 - 条件边动态路由
 - 循环回退（反思 → 重新选工具）
-- 检查点断点恢复
+- InMemorySaver 检查点
 """
 
 import logging
+import re
 import time
 import uuid
 from datetime import datetime
-from typing import Optional
+from typing import Any, Callable, Optional, cast
 
-from app.agent.state import RCAState
-from app.agent.graph import StateGraph
-from app.agent.nodes.analyze_symptom import analyze_symptom_node
-from app.agent.nodes.generate_hypotheses import generate_hypotheses_node
-from app.agent.nodes.select_tool import select_tool_node
-from app.agent.nodes.execute_tool import execute_tool_node
-from app.agent.nodes.observe_evidence import observe_evidence_node
-from app.agent.nodes.draft_rca import draft_rca_node
-from app.agent.nodes.reflect import reflect_node
-from app.agent.nodes.generate_report import generate_report_node
+from langgraph.checkpoint.memory import InMemorySaver
+from langgraph.graph import END, START, StateGraph
+from langchain_core.runnables.config import RunnableConfig
+
+from app.agent.node_adapter import ADAPTED_NODES
+from app.agent.state import (
+    RCAState,
+    RCAGraphState,
+    graph_state_to_rca_state,
+    rca_state_to_graph_state,
+)
 from app.persistence.checkpointer import Checkpointer
 from app.persistence.repositories import RCATaskRepository, StepEventRepository
 from app.schemas.api import AnomalyEvent, TaskStatus
 
 logger = logging.getLogger(__name__)
 
-# 节点拓扑顺序（用于断点恢复时确定下一个节点）
+# 节点拓扑顺序
 _NODE_ORDER = [
     "analyze_symptom",
     "generate_hypotheses",
@@ -61,17 +63,53 @@ _NODE_TITLES = {
 }
 
 
+_MAX_ERROR_LENGTH = 500
+
+# 敏感信息掩码模式（key=value 或 key: value 形式）
+_SECRET_PATTERNS = [
+    (re.compile(r"(password|passwd|pwd)\s*[=:]\s*\S+", re.IGNORECASE), r"\1=***"),
+    (re.compile(r"(api_key|apikey|api-key)\s*[=:]\s*\S+", re.IGNORECASE), r"\1=***"),
+    (re.compile(r"(token|access_token|auth_token|bearer)\s*[=:]\s*\S+", re.IGNORECASE), r"\1=***"),
+    (re.compile(r"(authorization|auth)\s*[=:]\s*\S+", re.IGNORECASE), r"\1=***"),
+    (re.compile(r"(secret|private_key)\s*[=:]\s*\S+", re.IGNORECASE), r"\1=***"),
+    (re.compile(r"sk-[a-zA-Z0-9_-]{20,}"), "sk-***"),
+]
+
+
+def _safe_error_message(error: Exception) -> str:
+    """对异常消息进行安全处理：掩码敏感信息并截断过长消息。
+
+    Args:
+        error: 原始异常对象
+
+    Returns:
+        经过掩码和截断的安全错误消息字符串
+    """
+    msg = str(error)
+
+    # 掩码敏感信息
+    for pattern, replacement in _SECRET_PATTERNS:
+        msg = pattern.sub(replacement, msg)
+
+    # 截断过长消息
+    if len(msg) > _MAX_ERROR_LENGTH:
+        msg = msg[:_MAX_ERROR_LENGTH] + "..."
+
+    return msg
+
+
 class RCAWorkflow:
     """RCA 工作流编排器。
 
-    使用 StateGraph 构建 8 节点图编排流程，
-    支持条件边路由（反思 → 回退或继续）和检查点断点恢复。
+    使用官方 LangGraph StateGraph 构建 8 节点图编排流程，
+    支持条件边路由（反思 → 回退或继续）和 InMemorySaver 检查点。
     """
 
     _NODE_TITLES = _NODE_TITLES
 
     def __init__(self):
         self.checkpointer = Checkpointer()
+        self._memory_saver = InMemorySaver()
         self._node_start_times: dict[str, float] = {}
 
     # ── 事件发射 ──────────────────────────────────────────────
@@ -110,25 +148,22 @@ class RCAWorkflow:
 
     # ── 图构建 ────────────────────────────────────────────────
 
-    def _build_graph(self) -> StateGraph:
-        """构建 RCA 工作流的 StateGraph。
+    def _build_graph(self):
+        """构建 RCA 工作流的官方 LangGraph StateGraph。
 
         Returns:
-            配置好节点和边的 StateGraph 实例
+            编译后的 LangGraph StateGraph 实例
         """
-        graph = StateGraph()
+        graph = StateGraph(RCAGraphState)
 
-        # 注册所有节点
-        graph.add_node("analyze_symptom", analyze_symptom_node)
-        graph.add_node("generate_hypotheses", generate_hypotheses_node)
-        graph.add_node("select_tool", select_tool_node)
-        graph.add_node("execute_tool", execute_tool_node)
-        graph.add_node("observe_evidence", observe_evidence_node)
-        graph.add_node("draft_rca", draft_rca_node)
-        graph.add_node("reflect", reflect_node)
-        graph.add_node("generate_report", generate_report_node)
+        # 注册所有节点（使用适配后的节点函数）
+        for node_name in _NODE_ORDER:
+            graph.add_node(node_name, cast(Callable[..., Any], ADAPTED_NODES[node_name]))
 
-        # 普通边：线性执行链
+        # 入口边
+        graph.add_edge(START, "analyze_symptom")
+
+        # 线性边
         graph.add_edge("analyze_symptom", "generate_hypotheses")
         graph.add_edge("generate_hypotheses", "select_tool")
         graph.add_edge("select_tool", "execute_tool")
@@ -137,8 +172,6 @@ class RCAWorkflow:
         graph.add_edge("draft_rca", "reflect")
 
         # 条件边：反思节点根据结果动态路由
-        # PROCEED → 生成报告
-        # NEED_MORE_EVIDENCE → 回到 select_tool（循环回退）
         graph.add_conditional_edges(
             "reflect",
             _reflect_condition,
@@ -148,10 +181,10 @@ class RCAWorkflow:
             },
         )
 
-        # 设置入口节点
-        graph.set_entry_point("analyze_symptom")
+        # 出口边
+        graph.add_edge("generate_report", END)
 
-        return graph
+        return graph.compile(checkpointer=self._memory_saver)
 
     # ── 主执行方法 ────────────────────────────────────────────
 
@@ -176,9 +209,7 @@ class RCAWorkflow:
         if task_id is None:
             task_id = f"rca-{uuid.uuid4().hex[:12]}"
 
-        # ── 断点恢复 ──────────────────────────────────────────
-        resume_from: Optional[str] = None
-
+        # ── 断点恢复（加载自定义检查点状态） ──────────────────
         if resume:
             checkpoint_state = self.checkpointer.load(task_id)
             if checkpoint_state is not None:
@@ -187,13 +218,6 @@ class RCAWorkflow:
                     f"last_node={checkpoint_state.current_node}"
                 )
                 state = checkpoint_state
-                resume_from = _get_next_node(state)
-                if resume_from is None:
-                    logger.warning(
-                        f"无法确定检查点后续节点，从头开始: task_id={task_id}"
-                    )
-                    resume_from = None
-                    state = self._init_state(event, task_id)
             else:
                 logger.info(
                     f"未找到检查点，从头开始: task_id={task_id}"
@@ -215,75 +239,11 @@ class RCAWorkflow:
 
         logger.info(
             f"开始 RCA 工作流: task_id={task_id}, type={event.anomaly_type}, "
-            f"resume={resume}, resume_from={resume_from}"
+            f"resume={resume}"
         )
 
         # ── 构建并编译图 ──────────────────────────────────────
-        graph = self._build_graph()
-        compiled = graph.compile()
-
-        # 设置节点开始回调：发射 node_started 事件
-        def on_node_start(node_name: str, current_state: RCAState) -> None:
-            self._node_start_times[node_name] = time.time()
-            self._emit_event(
-                task_id=task_id,
-                node_name=node_name,
-                event_type="node_started",
-                status="running",
-                title=f"开始{self._node_title(node_name)}",
-                summary=f"正在执行 {node_name}",
-                detail_json={
-                    "node_name": node_name,
-                    "round": current_state.reflection_round,
-                },
-            )
-
-        # 设置节点完成回调：保存检查点 + 发射 node_completed 事件
-        def on_node_complete(node_name: str, current_state: RCAState) -> None:
-            current_state.current_node = node_name
-            self.checkpointer.save(current_state)
-
-            start_time = self._node_start_times.pop(node_name, None)
-            duration_ms = None
-            if start_time is not None:
-                duration_ms = round((time.time() - start_time) * 1000)
-
-            self._emit_event(
-                task_id=task_id,
-                node_name=node_name,
-                event_type="node_completed",
-                status="completed",
-                title=f"完成{self._node_title(node_name)}",
-                summary=f"{self._node_title(node_name)} 执行完成",
-                detail_json={
-                    "node_name": node_name,
-                    "round": current_state.reflection_round,
-                    "duration_ms": duration_ms,
-                },
-            )
-
-        # 设置节点错误回调：发射 node_error 事件
-        def on_node_error(node_name: str, current_state: RCAState, error: Exception) -> None:
-            error_msg = str(error)
-            error_type = type(error).__name__
-            self._emit_event(
-                task_id=task_id,
-                node_name=node_name,
-                event_type="node_error",
-                status="failed",
-                title=f"{self._node_title(node_name)} 执行失败",
-                summary=f"节点 {node_name} 执行异常: {error_msg}",
-                detail_json={
-                    "node_name": node_name,
-                    "round": current_state.reflection_round,
-                    "error": error_msg,
-                    "error_type": error_type,
-                },
-            )
-
-        compiled.set_start_callback(on_node_start)
-        compiled.set_callback(on_node_complete)
-        compiled.set_error_callback(on_node_error)
+        compiled = self._build_graph()
 
         # ── 发射 task_started 事件 ──────────────────────────────
         self._emit_event(
@@ -300,8 +260,66 @@ class RCAWorkflow:
         )
 
         # ── 执行图 ────────────────────────────────────────────
+        graph_input = rca_state_to_graph_state(state)
+        config: RunnableConfig = {
+            "configurable": {"thread_id": task_id},
+            "recursion_limit": 50,
+        }
+
         try:
-            state = compiled.invoke(state, resume_from=resume_from)
+            for chunk in compiled.stream(
+                graph_input, config=config, stream_mode="updates"
+            ):
+                for node_name in chunk:
+                    # 发射 node_started 事件
+                    self._node_start_times[node_name] = time.time()
+                    self._emit_event(
+                        task_id=task_id,
+                        node_name=node_name,
+                        event_type="node_started",
+                        status="running",
+                        title=f"开始{self._node_title(node_name)}",
+                        summary=f"正在执行 {node_name}",
+                        detail_json={
+                            "node_name": node_name,
+                        },
+                    )
+
+                    # 获取完整快照并转换回 RCAState
+                    snapshot = compiled.get_state(config)
+                    current_state = graph_state_to_rca_state(
+                        cast(RCAGraphState, snapshot.values)
+                    )
+                    current_state.current_node = node_name
+
+                    # 保存自定义检查点
+                    self.checkpointer.save(current_state)
+
+                    # 发射 node_completed 事件
+                    start_time = self._node_start_times.pop(node_name, None)
+                    duration_ms = None
+                    if start_time is not None:
+                        duration_ms = round((time.time() - start_time) * 1000)
+
+                    self._emit_event(
+                        task_id=task_id,
+                        node_name=node_name,
+                        event_type="node_completed",
+                        status="completed",
+                        title=f"完成{self._node_title(node_name)}",
+                        summary=f"{self._node_title(node_name)} 执行完成",
+                        detail_json={
+                            "node_name": node_name,
+                            "round": current_state.reflection_round,
+                            "duration_ms": duration_ms,
+                        },
+                    )
+
+            # ── 获取最终状态 ──────────────────────────────────
+            final_snapshot = compiled.get_state(config)
+            state = graph_state_to_rca_state(
+                cast(RCAGraphState, final_snapshot.values)
+            )
 
             # 标记完成
             state.status = TaskStatus.COMPLETED
@@ -334,7 +352,8 @@ class RCAWorkflow:
             )
 
         except Exception as e:
-            logger.error(f"RCA 工作流失败: task_id={task_id}, error={e}")
+            safe_msg = _safe_error_message(e)
+            logger.error(f"RCA 工作流失败: task_id={task_id}, error={safe_msg}")
             state.status = TaskStatus.FAILED
 
             # 发射 task_error 事件
@@ -344,9 +363,9 @@ class RCAWorkflow:
                 event_type="task_error",
                 status="failed",
                 title="根因分析失败",
-                summary=f"分析过程异常: {e}",
+                summary=f"分析过程异常: {safe_msg}",
                 detail_json={
-                    "error": str(e),
+                    "error": safe_msg,
                 },
             )
 
@@ -371,41 +390,14 @@ class RCAWorkflow:
 # 图辅助函数
 # ═══════════════════════════════════════════════════════════════
 
-def _reflect_condition(state: RCAState) -> str:
+def _reflect_condition(state: RCAGraphState) -> str:
     """反思节点的条件路由函数。
+
+    将 RCAGraphState 转换为 RCAState 后获取反思行动决策。
 
     根据反思结果决定下一步：
     - PROCEED → 生成最终报告
     - NEED_MORE_EVIDENCE → 回到工具选择，补充证据
     """
-    return state.get_reflection_action()
-
-
-def _get_next_node(state: RCAState) -> Optional[str]:
-    """根据当前状态确定下一个要执行的节点（用于断点恢复）。
-
-    处理两种情况：
-    1. 普通线性节点 → 取拓扑顺序中的下一个
-    2. reflect 节点 → 根据反思结果决定路由
-    """
-    current = state.current_node
-    if current is None:
-        return "analyze_symptom"
-
-    # reflect 节点的条件路由
-    if current == "reflect":
-        action = state.get_reflection_action()
-        if action == "NEED_MORE_EVIDENCE":
-            return "select_tool"
-        else:
-            return "generate_report"
-
-    # 普通线性路由：取拓扑顺序中的下一个
-    try:
-        idx = _NODE_ORDER.index(current)
-        if idx + 1 < len(_NODE_ORDER):
-            return _NODE_ORDER[idx + 1]
-    except ValueError:
-        pass
-
-    return None
+    rca_state = graph_state_to_rca_state(state)
+    return rca_state.get_reflection_action()

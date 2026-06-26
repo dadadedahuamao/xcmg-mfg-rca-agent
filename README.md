@@ -1,14 +1,18 @@
 ﻿# XCMG Manufacturing RCA Agent
 
-> 制造业根因分析智能体 — 基于 LangGraph 风格工作流的开源项目
+> 制造业根因分析智能体 — 基于官方 LangGraph 工作流的开源项目
 
-[![Python](https://img.shields.io/badge/Python-3.10+-blue.svg)](https://www.python.org/)
-[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-green.svg)](https://fastapi.tiangolo.com/)
-[![License](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
+[![Python](https://img.shields.io/badge/Python-3.10+-3776AB?style=flat-square&logo=python&logoColor=white)](https://www.python.org/)
+[![FastAPI](https://img.shields.io/badge/FastAPI-0.109+-009688?style=flat-square&logo=fastapi&logoColor=white)](https://fastapi.tiangolo.com/)
+[![LangGraph](https://img.shields.io/badge/LangGraph-1.2+-1C3C3C?style=flat-square)](https://github.com/langchain-ai/langgraph)
+[![Pydantic](https://img.shields.io/badge/Pydantic-2.5+-E92063?style=flat-square&logo=pydantic&logoColor=white)](https://docs.pydantic.dev/)
+[![PostgreSQL](https://img.shields.io/badge/PostgreSQL-pgvector-4169E1?style=flat-square&logo=postgresql&logoColor=white)](https://www.postgresql.org/)
+[![OpenAI](https://img.shields.io/badge/OpenAI--compatible-API-412991?style=flat-square&logo=openai&logoColor=white)](https://platform.openai.com/docs/api-reference)
+[![License](https://img.shields.io/badge/License-MIT-yellow?style=flat-square)](LICENSE)
 
 ## 项目概述
 
-XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis）智能体系统。它采用 **LangGraph 风格的有向图工作流**，结合 **MCP 风格工具调用**、**Skills SOP 知识库**、**RAG 混合检索** 和 **Text2SQL 安全查询**，自动分析 MES/APS/WMS/QMS 系统中的生产异常事件，定位根因并生成分析报告。
+XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis）智能体系统。它采用 **官方 LangGraph 有向图工作流**，结合 **MCP 风格工具调用**、**Skills SOP 知识库**、**RAG 混合检索** 和 **Text2SQL 安全查询**，自动分析 MES/APS/WMS/QMS 系统中的生产异常事件，定位根因并生成分析报告。
 
 ### 核心特性
 
@@ -72,7 +76,7 @@ XCMG-MFG-RCA-Agent 是一个面向制造业的根因分析（Root Cause Analysis
 
 | 模块 | 功能 | 状态 |
 |------|------|------|
-| 工作流 | 8 节点 LangGraph 风格 RCA 工作流 | ✅ |
+| 工作流 | 8 节点官方 LangGraph RCA 工作流 | ✅ |
 | 工作流 | 反思循环（最多 3 轮） | ✅ |
 | 工具 | 8 个 MCP 风格工具（工单/资源/设备维保/物料/接口/质量/知识/Text2SQL） | ✅ |
 | 工具 | 工具注册中心（单例模式） | ✅ |
@@ -383,8 +387,8 @@ xcmg-mfg-rca-agent/
 │   │   └── chat_execute.py        # 聊天执行逻辑
 │   ├── agent/                     # RCA 工作流引擎
 │   │   ├── state.py               # RCAState 状态定义
-│   │   ├── graph.py               # LangGraph 风格图构建
-│   │   ├── workflow.py            # RCAWorkflow 编排器
+│   │   ├── node_adapter.py        # 节点适配器（兼容 LangGraph 状态）
+│   │   ├── workflow.py            # RCAWorkflow 编排器（官方 LangGraph 编排）
 │   │   └── nodes/                 # 8 个工作流节点
 │   ├── tools/                     # MCP 风格工具系统
 │   ├── skills/                    # Skills SOP 知识库
