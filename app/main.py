@@ -59,7 +59,7 @@ def create_app() -> FastAPI:
     """创建 FastAPI 应用实例。"""
     app = FastAPI(
         title="XCMG Manufacturing RCA Agent",
-        description="制造业根因分析智能体 - LangGraph 风格工作流",
+        description="制造业根因分析智能体 - 基于官方 LangGraph 工作流",
         version=__version__,
         lifespan=lifespan,
     )

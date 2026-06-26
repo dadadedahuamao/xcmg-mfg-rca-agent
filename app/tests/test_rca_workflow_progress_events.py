@@ -1,8 +1,8 @@
-"""RCA 工作流进度事件测试 — Task 3: 为 RCAWorkflow 注入结构化节点事件。
+"""RCA 工作流进度事件测试 — 适配 LangGraph stream/get_state 执行模型。
 
 测试覆盖：
 - task_started / node_started / node_completed / task_done 正常流程
-- task_error / node_error 异常流程
+- task_error 异常流程（新模型不发射 node_error）
 - 中文 title/summary
 - detail_json 包含 node_name, round, duration_ms
 - reflect 循环追加新 seq 事件
@@ -35,7 +35,13 @@ def _make_state():
 
 
 def _run_with_mocked_graph(task_id="test-001", skip_persistence=True, raise_error=False):
+    """使用 mock compiled graph 运行工作流。
+
+    新执行模型：workflow.run() 调用 compiled.stream() 和 compiled.get_state()，
+    不再使用旧的回调/ invoke 模型。
+    """
     from app.agent.workflow import RCAWorkflow
+    from app.agent.state import rca_state_to_graph_state
 
     event, state = _make_state()
     workflow = RCAWorkflow()
@@ -49,55 +55,28 @@ def _run_with_mocked_graph(task_id="test-001", skip_persistence=True, raise_erro
          patch.object(workflow, "_build_graph") as mock_build, \
          patch.object(workflow.checkpointer, "save"):
 
-        mock_graph = Mock()
         mock_compiled = Mock()
-        captured_callbacks = {}
 
-        def mock_set_callback(cb):
-            captured_callbacks["complete"] = cb
-
-        def mock_set_start_callback(cb):
-            captured_callbacks["start"] = cb
-
-        def mock_set_error_callback(cb):
-            captured_callbacks["error"] = cb
-
-        mock_compiled.set_callback = mock_set_callback
-        mock_compiled.set_start_callback = mock_set_start_callback
-        mock_compiled.set_error_callback = mock_set_error_callback
-
-        def mock_invoke(initial_state, resume_from=None):
-            if raise_error:
-                # 模拟节点执行异常：先触发 start，再触发 error（传入 exception）
-                cb_start = captured_callbacks.get("start")
-                cb_error = captured_callbacks.get("error")
-                exc = RuntimeError("模拟节点执行失败")
-                if cb_start:
-                    cb_start("analyze_symptom", initial_state)
-                if cb_error:
-                    cb_error("analyze_symptom", initial_state, exc)
-                raise exc
-
-            cb_start = captured_callbacks.get("start")
-            cb_complete = captured_callbacks.get("complete")
-
+        if raise_error:
+            mock_compiled.stream.side_effect = RuntimeError("模拟节点执行失败")
+        else:
             nodes = [
                 "analyze_symptom", "generate_hypotheses", "select_tool",
                 "execute_tool", "observe_evidence", "draft_rca",
                 "reflect", "generate_report",
             ]
+            mock_compiled.stream.return_value = iter([
+                {node_name: {}} for node_name in nodes
+            ])
 
-            for node_name in nodes:
-                if cb_start:
-                    cb_start(node_name, initial_state)
-                if cb_complete:
-                    cb_complete(node_name, initial_state)
+        # Mock get_state 返回 graph state 快照
+        graph_state = rca_state_to_graph_state(state)
+        mock_snapshot = Mock()
+        mock_snapshot.values = graph_state
+        mock_compiled.get_state.return_value = mock_snapshot
 
-            return state
-
-        mock_compiled.invoke = mock_invoke
-        mock_graph.compile.return_value = mock_compiled
-        mock_build.return_value = mock_graph
+        # _build_graph 直接返回 mock compiled graph
+        mock_build.return_value = mock_compiled
 
         try:
             result = workflow.run(event=event, task_id=task_id,
@@ -173,50 +152,52 @@ def test_workflow_emits_task_error_on_exception():
     assert e["status"] == "failed"
 
 
-def test_workflow_emits_node_error_on_exception():
+def test_workflow_does_not_emit_node_error():
+    """新 LangGraph stream 模型不发射 node_error 事件。
+
+    异常通过 compiled.stream() 抛出，workflow 只发射 task_error。
+    """
     events = []
     try:
         _, events = _run_with_mocked_graph(raise_error=True)
     except RuntimeError:
         pass
     node_error = [e for e in events if e["event_type"] == "node_error"]
-    assert len(node_error) >= 1
+    assert len(node_error) == 0, (
+        f"新模型不应发射 node_error 事件，实际收到 {len(node_error)} 个"
+    )
 
 
-def test_node_error_includes_exception_message_in_summary():
-    """node_error 事件的 summary 应包含异常消息。"""
+def test_task_error_includes_exception_message_in_summary():
+    """task_error 事件的 summary 应包含异常消息。"""
     events = []
     try:
         _, events = _run_with_mocked_graph(raise_error=True)
     except RuntimeError:
         pass
-    node_error = [e for e in events if e["event_type"] == "node_error"]
-    assert len(node_error) >= 1
-    e = node_error[0]
+    task_error = [e for e in events if e["event_type"] == "task_error"]
+    assert len(task_error) == 1
+    e = task_error[0]
     assert "模拟节点执行失败" in e["summary"], (
         f"summary 应包含异常消息，实际: {e['summary']}"
     )
 
 
-def test_node_error_detail_json_includes_error_and_error_type():
-    """node_error 的 detail_json 应包含 error 和 error_type 字段。"""
+def test_task_error_detail_json_includes_error():
+    """task_error 的 detail_json 应包含 error 字段。"""
     events = []
     try:
         _, events = _run_with_mocked_graph(raise_error=True)
     except RuntimeError:
         pass
-    node_error = [e for e in events if e["event_type"] == "node_error"]
-    assert len(node_error) >= 1
-    e = node_error[0]
-    assert e.get("detail_json") is not None, "node_error 应有 detail_json"
+    task_error = [e for e in events if e["event_type"] == "task_error"]
+    assert len(task_error) == 1
+    e = task_error[0]
+    assert e.get("detail_json") is not None, "task_error 应有 detail_json"
     assert "error" in e["detail_json"], (
         f"detail_json 应包含 error 字段: {e['detail_json']}"
     )
-    assert "error_type" in e["detail_json"], (
-        f"detail_json 应包含 error_type 字段: {e['detail_json']}"
-    )
     assert e["detail_json"]["error"] == "模拟节点执行失败"
-    assert e["detail_json"]["error_type"] == "RuntimeError"
 
 
 # ============================================================================
@@ -308,7 +289,12 @@ def test_skip_persistence_still_emits_events():
 # ============================================================================
 
 def test_reflect_loop_appends_new_events():
+    """模拟 reflect 回退到 select_tool 的循环场景。
+
+    新模型通过 compiled.stream() 产生包含重复节点的 chunks 来模拟循环。
+    """
     from app.agent.workflow import RCAWorkflow
+    from app.agent.state import rca_state_to_graph_state
 
     event, state = _make_state()
     workflow = RCAWorkflow()
@@ -322,56 +308,29 @@ def test_reflect_loop_appends_new_events():
          patch.object(workflow, "_build_graph") as mock_build, \
          patch.object(workflow.checkpointer, "save"):
 
-        mock_graph = Mock()
         mock_compiled = Mock()
-        captured_callbacks = {}
 
-        def mock_set_callback(cb):
-            captured_callbacks["complete"] = cb
+        # 模拟循环：第一次遍历全部节点，reflect 触发 NEED_MORE_EVIDENCE 回退
+        loop_nodes = [
+            "analyze_symptom", "generate_hypotheses",
+            "select_tool", "execute_tool", "observe_evidence",
+            "draft_rca", "reflect",
+            # 回退到 select_tool
+            "select_tool", "execute_tool", "observe_evidence",
+            "draft_rca", "reflect",
+            # 最终 PROCEED → generate_report
+            "generate_report",
+        ]
+        mock_compiled.stream.return_value = iter([
+            {node_name: {}} for node_name in loop_nodes
+        ])
 
-        def mock_set_start_callback(cb):
-            captured_callbacks["start"] = cb
+        graph_state = rca_state_to_graph_state(state)
+        mock_snapshot = Mock()
+        mock_snapshot.values = graph_state
+        mock_compiled.get_state.return_value = mock_snapshot
 
-        def mock_set_error_callback(cb):
-            captured_callbacks["error"] = cb
-
-        mock_compiled.set_callback = mock_set_callback
-        mock_compiled.set_start_callback = mock_set_start_callback
-        mock_compiled.set_error_callback = mock_set_error_callback
-
-        def mock_invoke(initial_state, resume_from=None):
-            cb_start = captured_callbacks.get("start")
-            cb_complete = captured_callbacks.get("complete")
-
-            # 第一次循环
-            for node_name in ["analyze_symptom", "generate_hypotheses",
-                              "select_tool", "execute_tool", "observe_evidence",
-                              "draft_rca", "reflect"]:
-                if cb_start:
-                    cb_start(node_name, initial_state)
-                if cb_complete:
-                    cb_complete(node_name, initial_state)
-
-            # reflect 决定 NEED_MORE_EVIDENCE，回退到 select_tool
-            for node_name in ["select_tool", "execute_tool", "observe_evidence",
-                              "draft_rca", "reflect"]:
-                if cb_start:
-                    cb_start(node_name, initial_state)
-                if cb_complete:
-                    cb_complete(node_name, initial_state)
-
-            # 最终 PROCEED -> generate_report
-            for node_name in ["generate_report"]:
-                if cb_start:
-                    cb_start(node_name, initial_state)
-                if cb_complete:
-                    cb_complete(node_name, initial_state)
-
-            return state
-
-        mock_compiled.invoke = mock_invoke
-        mock_graph.compile.return_value = mock_compiled
-        mock_build.return_value = mock_graph
+        mock_build.return_value = mock_compiled
 
         workflow.run(event=event, task_id="test-loop", skip_persistence=True)
 
@@ -411,42 +370,101 @@ def test_all_eight_nodes_have_chinese_titles():
 # ============================================================================
 
 def test_checkpoint_save_still_occurs():
+    """验证新 stream 模型下检查点保存仍然正常触发。"""
     from app.agent.workflow import RCAWorkflow
+    from app.agent.state import rca_state_to_graph_state
 
     event, state = _make_state()
     workflow = RCAWorkflow()
 
-    with patch.object(workflow, "_build_graph") as mock_build,          patch("app.agent.workflow.StepEventRepository.append_event"),          patch.object(workflow.checkpointer, "save") as mock_save:
+    with patch.object(workflow, "_build_graph") as mock_build, \
+         patch("app.agent.workflow.StepEventRepository.append_event"), \
+         patch.object(workflow.checkpointer, "save") as mock_save:
 
-        mock_graph = Mock()
         mock_compiled = Mock()
-        captured_callbacks = {}
 
-        def mock_set_callback(cb):
-            captured_callbacks["complete"] = cb
+        nodes = [
+            "analyze_symptom", "generate_hypotheses", "select_tool",
+            "execute_tool", "observe_evidence", "draft_rca",
+            "reflect", "generate_report",
+        ]
+        mock_compiled.stream.return_value = iter([
+            {node_name: {}} for node_name in nodes
+        ])
 
-        def mock_set_start_callback(cb):
-            captured_callbacks["start"] = cb
+        graph_state = rca_state_to_graph_state(state)
+        mock_snapshot = Mock()
+        mock_snapshot.values = graph_state
+        mock_compiled.get_state.return_value = mock_snapshot
 
-        def mock_set_error_callback(cb):
-            captured_callbacks["error"] = cb
-
-        mock_compiled.set_callback = mock_set_callback
-        mock_compiled.set_start_callback = mock_set_start_callback
-        mock_compiled.set_error_callback = mock_set_error_callback
-
-        def mock_invoke(initial_state, resume_from=None):
-            for node_name in ["analyze_symptom", "generate_hypotheses",
-                              "select_tool", "execute_tool", "observe_evidence",
-                              "draft_rca", "reflect", "generate_report"]:
-                if captured_callbacks:
-                    captured_callbacks["complete"](node_name, initial_state)
-            return state
-
-        mock_compiled.invoke = mock_invoke
-        mock_graph.compile.return_value = mock_compiled
-        mock_build.return_value = mock_graph
+        mock_build.return_value = mock_compiled
 
         workflow.run(event=event, task_id="test-ckpt", skip_persistence=True)
 
     assert mock_save.call_count == 8
+
+
+# ============================================================================
+# 安全错误消息测试
+# ============================================================================
+
+def test_safe_error_message_masks_password():
+    """_safe_error_message 应掩码 password=xxx 形式的敏感信息。"""
+    from app.agent.workflow import _safe_error_message
+
+    error = Exception("连接失败: password=mysecret123, host=localhost")
+    safe = _safe_error_message(error)
+    assert "mysecret123" not in safe
+    assert "password=***" in safe
+    assert "host=localhost" in safe
+
+
+def test_safe_error_message_masks_api_key():
+    """_safe_error_message 应掩码 api_key=xxx 形式的敏感信息。"""
+    from app.agent.workflow import _safe_error_message
+
+    error = Exception("认证失败: api_key=sk-abc123def456, user=admin")
+    safe = _safe_error_message(error)
+    assert "sk-abc123def456" not in safe
+    assert "api_key=***" in safe
+    assert "user=admin" in safe
+
+
+def test_safe_error_message_masks_token():
+    """_safe_error_message 应掩码 token=xxx 形式的敏感信息。"""
+    from app.agent.workflow import _safe_error_message
+
+    error = Exception("token=eyJhbGciOiJIUzI1NiJ9.eyJzdWIiOiIxMjM0NTY3ODkwIn0 invalid")
+    safe = _safe_error_message(error)
+    assert "eyJhbGciOiJIUzI1NiJ9" not in safe
+    assert "token=***" in safe
+
+
+def test_safe_error_message_masks_sk_prefix():
+    """_safe_error_message 应掩码 sk- 前缀的长密钥。"""
+    from app.agent.workflow import _safe_error_message
+
+    error = Exception("密钥 sk-proj-abcdefghijklmnopqrstuvwxyz 无效")
+    safe = _safe_error_message(error)
+    assert "sk-proj-abcdefghijklmnopqrstuvwxyz" not in safe
+    assert "sk-***" in safe
+
+
+def test_safe_error_message_truncates_long_messages():
+    """_safe_error_message 应截断超过 500 字符的消息。"""
+    from app.agent.workflow import _safe_error_message
+
+    long_msg = "x" * 600
+    error = Exception(long_msg)
+    safe = _safe_error_message(error)
+    assert len(safe) <= 503  # 500 + "..."
+    assert safe.endswith("...")
+
+
+def test_safe_error_message_preserves_safe_content():
+    """_safe_error_message 不应修改不含敏感信息的普通消息。"""
+    from app.agent.workflow import _safe_error_message
+
+    error = Exception("模拟节点执行失败")
+    safe = _safe_error_message(error)
+    assert safe == "模拟节点执行失败"

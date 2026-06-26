@@ -32,8 +32,8 @@ def test_imports():
     # Agent
     from app.agent.state import RCAState
     from app.agent.workflow import RCAWorkflow
-    from app.agent.graph import StateGraph, CompiledGraph
-    print("  ✓ app.agent (含 StateGraph)")
+    from app.agent.node_adapter import ADAPTED_NODES
+    print("  ✓ app.agent (含 LangGraph 工作流)")
 
     # Nodes
     from app.agent.nodes.analyze_symptom import analyze_symptom_node

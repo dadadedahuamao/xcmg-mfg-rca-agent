@@ -54,6 +54,9 @@ app/data/sample.db
 *.log
 logs/
 
+# Agent local workspace state
+.omo/
+
 # Sisyphus
 .sisyphus/
 

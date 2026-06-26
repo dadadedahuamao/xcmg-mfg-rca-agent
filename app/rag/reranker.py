@@ -2,6 +2,7 @@
 
 import json
 import logging
+from concurrent.futures import ThreadPoolExecutor, as_completed
 from typing import Any
 
 import httpx
@@ -9,6 +10,8 @@ import httpx
 from app.config import settings
 
 logger = logging.getLogger(__name__)
+
+_DEFAULT_RERANK_WORKERS = 8
 
 
 class Reranker:
@@ -44,28 +47,37 @@ class Reranker:
         )
 
     def _rerank_with_model(self, query: str, candidates: list[dict]) -> list[dict]:
-        ranked_items = []
-        for index, doc in enumerate(candidates):
+        ranked_items: list[dict[str, Any]] = [None] * len(candidates)  # type: ignore[list-item]
+        max_workers = min(len(candidates), _DEFAULT_RERANK_WORKERS)
+
+        def _score_one(index: int, doc: dict) -> dict[str, Any]:
             response = httpx.post(
                 f"{settings.reranker_base_url.rstrip('/')}/api/generate",
                 json={
                     "model": settings.reranker_model,
                     "prompt": self._build_pair_prompt(query, doc),
                     "stream": False,
-                    "options": {
-                        "temperature": 0,
-                        "num_predict": 8,
-                    },
+                    "options": {"temperature": 0, "num_predict": 8},
                 },
                 timeout=settings.llm_timeout_seconds,
             )
             response.raise_for_status()
             score = self._score_yes_no_response(str(response.json().get("response", "")))
-            ranked_items.append({
+            return {
                 "id": str(doc.get("id", index)),
                 "score": score,
                 "reason": self._build_yes_no_reason(score),
-            })
+            }
+
+        with ThreadPoolExecutor(max_workers=max_workers) as executor:
+            futures = {
+                executor.submit(_score_one, idx, doc): idx
+                for idx, doc in enumerate(candidates)
+            }
+            for future in as_completed(futures):
+                idx = futures[future]
+                ranked_items[idx] = future.result()
+
         return self._merge_model_scores(candidates, ranked_items)
 
     def _build_pair_prompt(self, query: str, doc: dict) -> str:
